@@ -1,6 +1,6 @@
 "use server";
 
-import { createServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe";
 
 /* ---------------- SIGN UP ---------------- */
@@ -17,7 +17,7 @@ export async function signUp({
   lastName: string;
 }) {
   try {
-    const supabase = await createServerClient();
+    const supabase = await createClient();
 
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -75,7 +75,7 @@ export async function signIn({
   password: string;
 }) {
   try {
-    const supabase = await createServerClient();
+    const supabase = await createClient();
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
@@ -101,7 +101,7 @@ export async function signIn({
 
 export async function getLoggedInUser() {
   try {
-    const supabase = await createServerClient();
+    const supabase = await createClient();
 
     const {
       data: { user },
@@ -130,7 +130,7 @@ export async function getLoggedInUser() {
 
 export async function logoutAccount() {
   try {
-    const supabase = await createServerClient();
+    const supabase = await createClient();
 
     await supabase.auth.signOut();
 

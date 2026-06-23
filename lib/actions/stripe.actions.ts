@@ -1,4 +1,3 @@
-//lib/actions/stripe.actions.ts
 "use server";
 
 import Stripe from "stripe";
@@ -8,128 +7,195 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2026-05-27.dahlia",
 });
 
-interface CreateCardholderParams {
-  customerId: string;
+interface RegisterStripeUserParams {
+  userId: string;
   email: string;
   firstName: string;
   lastName: string;
-  supabaseUserId: string;
-}
-interface CreateCustomerParams {
-  email: string;
-  firstName: string;
-  lastName: string;
-  supabaseUserId: string;
+  address: {
+    line1: string;
+    city: string;
+    state: string;
+    postal_code: string;
+    country: string;
+  };
 }
 
-export async function createStripeCustomer({
-  email,
-  firstName,
-  lastName,
-  supabaseUserId,
-}: CreateCustomerParams) {
+/**
+ * Create Stripe Customer
+ */
+async function createStripeCustomer(
+  userId: string,
+  email: string,
+  firstName: string,
+  lastName: string
+) {
   const supabase = await createClient();
 
-  try {
-    // Check if customer already exists
-    const { data: existing } = await supabase
-      .from("users")
-      .select("*")
-      .eq("user_id", supabaseUserId)
-      .maybeSingle();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("stripe_customer_id")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-    if (existing) {
-      return existing;
-    }
+  if (profile?.stripe_customer_id) {
+    return profile.stripe_customer_id;
+  }
 
-    const customer = await stripe.customers.create({
+  const customer = await stripe.customers.create({
+    email,
+    name: `${firstName} ${lastName}`,
+    metadata: {
+      supabase_user_id: userId,
+    },
+  });
+
+  const { error } = await supabase
+    .from("profiles")
+    .upsert({
+      user_id: userId,
       email,
-      name: `${firstName} ${lastName}`,
-      metadata: {
-        supabase_user_id: supabaseUserId,
-      },
+      full_name: `${firstName} ${lastName}`,
+      stripe_customer_id: customer.id,
     });
 
-    const { error } = await supabase
-      .from("profiles")
-      .insert({
-        user_id: supabaseUserId,
-        stripe_customer_id: customer.id,
-        email: customer.email,
-        name: customer.name,
-      });
+  if (error) throw error;
 
-    if (error) throw error;
-
-    return customer;
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
+  return customer.id;
 }
-export async function createStripeCardholder({
-  customerId,
-  email,
-  firstName,
-  lastName,
-  supabaseUserId,
-}: CreateCardholderParams) {
+
+/**
+ * Create Cardholder
+ */
+async function createStripeCardholder(
+  userId: string,
+  customerId: string,
+  email: string,
+  firstName: string,
+  lastName: string,
+  address: RegisterStripeUserParams["address"]
+) {
   const supabase = await createClient();
 
-  try {
-    const { data: existing } = await supabase
-      .from("cards")
-      .select("*")
-      .eq("user_id", supabaseUserId)
-      .maybeSingle();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("stripe_cardholder_id")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-    if (existing) {
-      return existing;
-    }
+  if (profile?.stripe_cardholder_id) {
+    return profile.stripe_cardholder_id;
+  }
 
-    const cardholder = await stripe.issuing.cardholders.create({
-      type: "individual",
-      name: `${firstName} ${lastName}`,
-      email,
+  const cardholder = await stripe.issuing.cardholders.create({
+    type: "individual",
 
-      billing: {
-        address: {
-          line1: "123 Main Street",
-          city: "New York",
-          state: "NY",
-          postal_code: "10001",
-          country: "US",
-        },
-      },
+    name: `${firstName} ${lastName}`,
 
-      individual: {
-        first_name: firstName,
-        last_name: lastName,
-      },
+    email,
 
-      metadata: {
-        stripe_customer_id: customerId,
-        supabase_user_id: supabaseUserId,
-      },
+    billing: {
+      address,
+    },
+
+    individual: {
+      first_name: firstName,
+      last_name: lastName,
+    },
+
+    metadata: {
+      supabase_user_id: userId,
+      stripe_customer_id: customerId,
+    },
+  });
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      stripe_cardholder_id: cardholder.id,
+    })
+    .eq("user_id", userId);
+
+  if (error) throw error;
+
+  return cardholder.id;
+}
+
+/**
+ * Create Virtual Card
+ */
+async function createVirtualCard(
+  userId: string,
+  cardholderId: string
+) {
+  const supabase = await createClient();
+
+  const { data: existing } = await supabase
+    .from("cards")
+    .select("stripe_card_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (existing?.stripe_card_id) {
+    return existing.stripe_card_id;
+  }
+
+  const card = await stripe.issuing.cards.create({
+    cardholder: cardholderId,
+    currency: "usd",
+    type: "virtual",
+  });
+
+  const { error } = await supabase
+    .from("cards")
+    .insert({
+      user_id: userId,
+      stripe_card_id: card.id,
+      cardholder_id: cardholderId,
+      status: card.status,
+      type: card.type,
+      currency: card.currency,
+      brand: card.brand,
+      last4: card.last4,
+      exp_month: card.exp_month,
+      exp_year: card.exp_year,
     });
 
-    const { error } = await supabase
-      .from("profiles")
-      .upsert({
-        user_id: supabaseUserId,
-        stripe_customer_id: customerId,
-        stripe_cardholder_id: cardholder.id,
-        email,
-        full_name: `${firstName} ${lastName}`,
-        status: cardholder.status,
-        type: cardholder.type,
-      });
+  if (error) throw error;
 
-    if (error) throw error;
+  return card.id;
+}
 
-    return cardholder;
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
+/**
+ * Main Registration Function
+ */
+export async function registerStripeUser(
+  params: RegisterStripeUserParams
+) {
+  const customerId = await createStripeCustomer(
+    params.userId,
+    params.email,
+    params.firstName,
+    params.lastName
+  );
+
+  const cardholderId = await createStripeCardholder(
+    params.userId,
+    customerId,
+    params.email,
+    params.firstName,
+    params.lastName,
+    params.address
+  );
+
+  const cardId = await createVirtualCard(
+    params.userId,
+    cardholderId
+  );
+
+  return {
+    customerId,
+    cardholderId,
+    cardId,
+  };
 }
