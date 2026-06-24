@@ -1,4 +1,3 @@
-// lib/actions/register.actions.ts
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
@@ -18,120 +17,118 @@ interface RegisterParams {
   password: string;
 }
 
-export async function registerUser({
+export const registerUser = async ({
   firstName,
   lastName,
   email,
   password,
-}: RegisterParams) {
+}: RegisterParams) => {
   try {
     const supabase = await createClient();
-    const adminSupabase = createAdminClient();
+    const admin = createAdminClient();
 
-    // -----------------------------
-    // 1. CREATE AUTH USER
-    // -----------------------------
-    const { data, error: authError } = await supabase.auth.signUp({
+    // 1. AUTH USER
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: {
-          firstName,
-          lastName,
-        },
+        data: { firstName, lastName },
       },
     });
 
-    if (authError) throw authError;
+    if (error) throw error;
 
-    const user = data?.user;
-    if (!user) throw new Error("Failed to create user.");
+    const user = data.user;
+    if (!user) throw new Error("User creation failed");
 
-    // -----------------------------
-    // 2. STRIPE CUSTOMER
-    // -----------------------------
+    // 2. CREATE PUBLIC USERS TABLE
+    await admin.from("users").insert({
+      id: user.id,
+      email,
+      full_name: `${firstName} ${lastName}`,
+      kyc_status: "pending",
+    });
+
+    // 3. CREATE PROFILE
+    await admin.from("profiles").insert({
+      id: user.id,
+      email,
+      first_name: firstName,
+      last_name: lastName,
+    });
+
+    // 4. STRIPE CUSTOMER
     const customer = await createStripeCustomer({
       email,
       firstName,
       lastName,
-      supabaseUserId: user.id,
+      userId: user.id,
     });
 
-    if (!customer?.id) {
-      throw new Error("Failed to create Stripe customer.");
-    }
+    await admin
+      .from("users")
+      .update({ stripe_customer_id: customer.id })
+      .eq("id", user.id);
 
-    // -----------------------------
-    // 3. STRIPE CARDHOLDER
-    // -----------------------------
+    await admin
+      .from("profiles")
+      .update({ stripe_customer_id: customer.id })
+      .eq("id", user.id);
+
+    // 5. STRIPE CARDHOLDER
     const cardholder = await createStripeCardholder({
+      userId: user.id,
       customerId: customer.id,
       email,
       firstName,
       lastName,
-      supabaseUserId: user.id,
+      address: {
+        line1: "N/A",
+        city: "N/A",
+        state: "N/A",
+        postal_code: "00000",
+        country: "US",
+      },
     });
 
-    if (!cardholder?.id) {
-      throw new Error("Failed to create Stripe cardholder.");
-    }
+    await admin
+      .from("profiles")
+      .update({ stripe_cardholder_id: cardholder.id })
+      .eq("id", user.id);
 
-    // -----------------------------
-    // 4. CREATE BANK ACCOUNT
-    // -----------------------------
+    // 6. BANK ACCOUNT
     const accountNumber = `AC${Date.now()}${Math.floor(
       100 + Math.random() * 900
     )}`;
 
-    const { data: bank, error: bankError } = await adminSupabase
+    const { data: bank, error: bankError } = await admin
       .from("bank_accounts")
       .insert({
         user_id: user.id,
         account_number: accountNumber,
-
-        iban: null,
         bank_name: "Verizon Bank",
-        institution_id: null,
-
         account_name: `${firstName} ${lastName}`,
         official_name: `${firstName} ${lastName}`,
-
         account_type: "personal",
         subtype: "checking",
         currency: "XAF",
-
-        current_balance: 0,
-        available_balance: 0,
-        frozen_balance: 0,
-
-        mask: accountNumber.slice(-4),
-
         status: "active",
-        shareable_id: crypto.randomUUID(),
-
+        mask: accountNumber.slice(-4),
         stripe_cardholder_id: cardholder.id,
       })
       .select()
       .single();
 
     if (bankError) throw bankError;
-    if (!bank) throw new Error("Bank account creation failed.");
 
-    // -----------------------------
-    // 5. CREATE VIRTUAL CARD (handles Stripe + DB internally)
-    // -----------------------------
+    // 7. VIRTUAL CARD
     const card = await createVirtualCard({
       bankId: bank.id,
+      userId: user.id,
       stripeCardholderId: cardholder.id,
+      stripeCustomerId: customer.id,
     });
 
-    if (!card?.id) {
-      throw new Error("Failed to create virtual card.");
-    }
-
-    // -----------------------------
-    // SUCCESS RESPONSE
-    // -----------------------------
     return {
       success: true,
       userId: user.id,
@@ -141,14 +138,9 @@ export async function registerUser({
       cardId: card.id,
     };
   } catch (error) {
-    console.error("REGISTER ERROR:", error);
-
     return {
       success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : "Registration failed.",
+      error: error instanceof Error ? error.message : "Registration failed",
     };
   }
-}
+};
