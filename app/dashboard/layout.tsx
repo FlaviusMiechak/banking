@@ -1,30 +1,35 @@
 import MobileNav from "@/components/MobileNav";
 import Sidebar from "@/components/Sidebar";
-import { getLoggedInUser } from "@/lib/actions/user.action";
-import { toAppUser } from "@/lib/utils";
 import Image from "next/image";
 import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { toAppUser } from "@/lib/utils";
 
 export default async function BankingLayout({
   children,
-}: Readonly<{ children: React.ReactNode }>) {
-  const loggedIn = await getLoggedInUser();
+}: {
+  children: React.ReactNode;
+}) {
+  const supabase = await createClient();
 
-  if (!loggedIn) redirect("/sign-in");
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  const sidebarUser = toAppUser(loggedIn);
+  if (!user) redirect("/sign-in");
+
+  const sidebarUser = toAppUser(user);
 
   return (
     <main className="flex h-screen w-full font-inter">
       <Sidebar user={sidebarUser} />
 
-      <div className="flex size-full flex-col">
-        <div className="root-layout">
+      <div className="flex flex-1 flex-col">
+        <div className="root-layout flex items-center justify-between p-4 border-b">
           <Image src="/icons/logo.svg" width={30} height={30} alt="logo" />
-          <div>
-            <MobileNav user={sidebarUser} />
-          </div>
+          <MobileNav user={sidebarUser} />
         </div>
+
         {children}
       </div>
     </main>

@@ -122,14 +122,14 @@ const mapTransaction = (transaction: any, bank_id?: string) => ({
    Accounts
 ------------------------------ */
 
-export const getAccounts = async ({ userId }: { userId: string }) => {
+export const getAccounts = async ({ user_id }: { user_id: string }) => {
   try {
     const supabase = createAdminClient();
 
     const { data: banks, error } = await supabase
       .from("bank_accounts")
       .select("*")
-      .eq("user_id", userId);
+      .eq("user_id", user_id);
 
     if (error) throw error;
 
@@ -204,10 +204,10 @@ export const getTransactions = async ({
 ------------------------------ */
 
 export async function createBankAccount({
-  userId,
+  user_id,
   accountName,
 }: {
-  userId: string;
+  user_id: string;
   accountName: string;
 }) {
   const supabase = createAdminClient();
@@ -218,10 +218,10 @@ export async function createBankAccount({
   const { data, error } = await supabase
     .from("bank_accounts")
     .insert({
-      user_id: userId,
+      user_id: user_id,
 
       account_number: accountNumber,
-      iban,
+      iban:generateIBAN(),
 
       bank_name: "Nova Bank",
       institution_id: "NOVA",
@@ -257,13 +257,13 @@ export async function createBankAccount({
    Get Bank by User
 ------------------------------ */
 
-export async function getBankAccountByUserId(userId: string) {
+export async function getBankAccountByUserId(user_id: string) {
   const supabase = createAdminClient();
 
   const { data, error } = await supabase
     .from("bank_accounts")
     .select("*")
-    .eq("user_id", userId)
+    .eq("user_id", user_id)
     .maybeSingle();
 
   if (error) {

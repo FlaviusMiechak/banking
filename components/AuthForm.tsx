@@ -8,7 +8,7 @@ import React, { useState } from 'react'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { registerUser } from '@/lib/actions/register.actions'
+
 import { Button } from '@/components/ui/button'
 import { Form } from '@/components/ui/form'
 
@@ -18,10 +18,8 @@ import { authFormSchema } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 
-import {
-  signIn,
-  signUp,
-} from '@/lib/actions/user.action'
+import { registerUser, loginUser } from '@/lib/actions/user.action'
+
 
 const AuthForm = ({
   type,
@@ -69,13 +67,13 @@ const AuthForm = ({
     }
 
     if (type === "sign-in") {
-      const response = await signIn({
+      const response = await loginUser({
         email: data.email,
         password: data.password,
       });
 
       if (response) {
-        router.push("/");
+        router.push("/dashboard");
         router.refresh(); // 🔥 CRITICAL FIX
       }
     }

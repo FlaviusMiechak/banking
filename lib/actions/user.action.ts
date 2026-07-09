@@ -1,56 +1,31 @@
-// lib/actions/user.action.ts
 "use server";
 
-
-import { createAdminClient } from "@/lib/supabase/admin";
 import Stripe from "stripe";
-import { createClient} from "@/lib/supabase/server";
-import { getAccount } from "./transaction.actions";
 import crypto from "crypto";
-import { isBooleanObject } from "util/types";
-import { availableParallelism } from "os";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-function generateAccountNumber(length = 12): string {
-  let accountNumber = "";
-
-  while (accountNumber.length < length) {
-    accountNumber += crypto.randomInt(0, 10).toString();
-  }
-
-  return accountNumber;
-}
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-05-27.dahlia", // ✅ stable Stripe API version
+  apiVersion: "2026-05-27.dahlia",
 });
 
-// 🔹 Get logged-in user (server-side)
-export async function getLoggedInUser() {
-  const supabase =await createClient(); // ✅ no await
-  const { data: { user }, error } = await supabase.auth.getUser();
-
-  if (error) {
-    if (error.code === "refresh_token_not_found") {
-      await supabase.auth.signOut({ scope: "local" }).catch(() => null);
-      return null;
-    }
-
-    console.error("Auth error:", error.message);
-    return null;
+function generateAccountNumber(length = 12) {
+  let num = "";
+  while (num.length < length) {
+    num += crypto.randomInt(0, 10);
   }
-  return user;
+  return num;
 }
 
-// 🔹 Sign-in helper
-export async function signIn({ email, password }: { email: string; password: string }) {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-  if (error) throw error;
-  return data.user;
+function generateId(prefix: string) {
+  return `${prefix}_${crypto.randomUUID()}`;
 }
 
-// 🔹 Sign-up helper with Stripe + profile + bank account
-export async function signUp({
+/* =========================================================
+   REGISTER USER
+========================================================= */
+
+export async function registerUser({
   firstName,
   lastName,
   email,
@@ -62,27 +37,31 @@ export async function signUp({
   password: string;
 }) {
   const supabase = await createClient();
-  const adminSupabase = createAdminClient();
+  const admin = createAdminClient();
 
-  // 1. Create Supabase user
+  /* 1. Create Auth User */
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: {
-        firstName,
-        lastName,
-      },
+      data: { firstName, lastName },
     },
   });
 
   if (error) throw error;
+  if (!data.user) throw new Error("User creation failed");
 
   const user = data.user;
 
-  if (!user) return null;
+  /* 2. Create public.users */
+  await admin.from("users").insert({
+    id: user.id,
+    email,
+    first_name: firstName,
+    last_name: lastName,
+  });
 
-  // 2. Create Stripe customer
+  /* 3. Create Stripe Customer */
   const customer = await stripe.customers.create({
     email,
     name: `${firstName} ${lastName}`,
@@ -91,58 +70,15 @@ export async function signUp({
     },
   });
 
-  // 3. Create Stripe cardholder
-  const cardholder = await stripe.issuing.cardholders.create({
-    type: "individual",
-    name: `${firstName} ${lastName}`,
-    email,
-
-    billing: {
-      address: {
-        line1: "123 Main Street",
-        city: "New York",
-        state: "NY",
-        postal_code: "10001",
-        country: "US",
-      },
-    },
-
-    individual: {
-      first_name: firstName,
-      last_name: lastName,
-    },
-
-    metadata: {
-      supabase_user_id: user.id,
-      stripe_customer_id: customer.id,
-    },
-  });
-
-  // 4. Save profile
-  const { error: profileError } = await adminSupabase
-    .from("users")
-    .upsert({
-      id: user.id,
-
-      email,
-      first_name: firstName,
-      last_name: lastName,
-
-      stripe_customer_id: customer.id,
-      stripe_cardholder_id: cardholder.id,
-      stripe_cardholder_status: cardholder.status,
-      stripe_cardholder_type: cardholder.type,
-    });
-
-  if (profileError) throw profileError;
-
-  // 5. Create bank account
-  const { data: bank, error: bankError } = await adminSupabase
+  /* 4. Create bank account */
+  const { data: bank, error: bankError } = await admin
     .from("bank_accounts")
     .insert({
       user_id: user.id,
       bank_id: crypto.randomUUID(),
-      iban:generateAccountNumber(14),
+      account_id: generateId("acc"),
+      account_number: generateAccountNumber(),
+      iban: generateAccountNumber(14),
       account_name: `${firstName} ${lastName}`,
       official_name: `${firstName} ${lastName}`,
       account_type: "personal",
@@ -151,57 +87,170 @@ export async function signUp({
       current_balance: 0,
       available_balance: 0,
       frozen_balance: 0,
-      mask: generateAccountNumber(4),
       status: "active",
-      stripe_cardholder_id: cardholder.id,
-      account_number: generateAccountNumber(),
-      account_id: `acc_${crypto.randomUUID()}`,
-      access_token: crypto.randomUUID(),
-      funding_source_url: `https://funding-source.com/${crypto.randomUUID()}/stripe`,
-      shareable_id: "user.bank_id.id",
     })
     .select()
     .single();
 
   if (bankError) throw bankError;
 
-  // 6. Create Stripe virtual card
+  /* 5. Store Stripe profile (NO cardholder yet) */
+  await admin.from("profiles").insert({
+    user_id: user.id,
+    stripe_customer_id: customer.id,
+    stripe_cardholder_id: null,
+    kyc_status: "pending",
+  });
+
+  return { user, bank };
+}
+
+/* =========================================================
+   SUBMIT KYC (Stripe Hosted Verification)
+========================================================= */
+
+export async function submitKyc(userId: string) {
+  const admin = createAdminClient();
+
+  /* Create Stripe identity verification session */
+  const verificationSession =
+    await stripe.identity.verificationSessions.create({
+      type: "document",
+      metadata: {
+        user_id: userId,
+      },
+      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/kyc/success`,
+    });
+
+  return {
+    url: verificationSession.url,
+  };
+}
+
+/* =========================================================
+   CREATE CARDHOLDER (AFTER KYC VERIFIED)
+========================================================= */
+
+export async function createCardholder(userId: string) {
+  const admin = createAdminClient();
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+
+  if (!profile?.stripe_customer_id) {
+    throw new Error("Missing Stripe customer");
+  }
+
+  const cardholder = await stripe.issuing.cardholders.create({
+    type: "individual",
+    name: "Verified User",
+    email: profile.email,
+    billing: {
+      address: {
+        line1: "Verified Address",
+        city: "City",
+        state: "State",
+        postal_code: "00000",
+        country: "US",
+      },
+    },
+    metadata: {
+      user_id: userId,
+      stripe_customer_id: profile.stripe_customer_id,
+    },
+  });
+
+  /* Save cardholder */
+  await admin
+    .from("profiles")
+    .update({
+      stripe_cardholder_id: cardholder.id,
+      kyc_status: "verified",
+    })
+    .eq("user_id", userId);
+
+  return cardholder;
+}
+
+/* =========================================================
+   ISSUE CARD (ONLY AFTER CARDHOLDER EXISTS)
+========================================================= */
+
+export async function issueCard(userId: string, bankId: string) {
+  const admin = createAdminClient();
+
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .single();
+
+  if (!profile?.stripe_cardholder_id) {
+    throw new Error("Cardholder not created (KYC required)");
+  }
+
+  /* Create Stripe card */
   const card = await stripe.issuing.cards.create({
-    cardholder: cardholder.id,
+    cardholder: profile.stripe_cardholder_id,
     currency: "usd",
     type: "virtual",
   });
 
-  // 7. Save card
-  const { error: cardError } = await adminSupabase
-    .from("cards")
-    .insert({
-      bank_id: bank.id,
-      user_id: user.id,
+  /* Save card */
+  const { data, error } = await admin.from("cards").insert({
+    user_id: userId,
+    bank_id: bankId,
 
-      stripe_card_id: card.id,
-      stripe_cardholder_id: cardholder.id,
+    stripe_card_id: card.id,
+    stripe_cardholder_id: profile.stripe_cardholder_id,
+    stripe_customer_id: profile.stripe_customer_id,
 
-      // Remove this if your cards table doesn't have this column
-      stripe_customer_id: customer.id,
-      spending_limit:15000,
-      
-      brand: card.brand,
-      last4: card.last4,
-      exp_month: card.exp_month,
-      exp_year: card.exp_year,
-      card_type: card.type,
-      funding: card.financial_account ?? null,
-      currency: card.currency,
-      status: card.status,
-      billing_address: cardholder.billing.address,
-    });
+    brand: card.brand,
+    last4: card.last4,
+    exp_month: card.exp_month,
+    exp_year: card.exp_year,
 
-  if (cardError) throw cardError;
+    card_type: "virtual",
+    status: card.status,
+    currency: card.currency,
+  });
 
-  return user;
+  if (error) throw error;
+
+  return data;
 }
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+export async function loginUser({
+  email,
+  password,
+}: {
+  email: string;
+  password: string;
+}) {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) throw error;
+
+  return data.user;
+}
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
 export async function logout() {
-  const supabase =createClient();
+  const supabase = await createClient();
   await supabase.auth.signOut();
 }

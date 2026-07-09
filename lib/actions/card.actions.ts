@@ -2,6 +2,7 @@
 
 import Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createServerClient } from "../supabaseServer";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2026-05-27.dahlia",
@@ -55,3 +56,16 @@ export const createVirtualCard = async ({
 
   return data;
 };
+
+export async function getCards(userId: string) {
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("cards")
+    .select("*")
+    .eq("user_id", userId);
+
+  if (error) throw error;
+
+  return data;
+}
