@@ -1,7 +1,7 @@
 // lib/utils/sync-card-status.ts
 import { cardServiceServer } from '@/lib/services/card.service.server';
 import Stripe from 'stripe';
-
+export const dynamic = 'force-dynamic'
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   //apiVersion: '2025-02-24.acacia',
 });

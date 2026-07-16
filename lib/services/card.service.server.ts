@@ -1,6 +1,6 @@
 // lib/services/card.service.server.ts
 import { createClient as createServerClient } from '@/lib/supabase/server';
-
+export const dynamic = 'force-dynamic'
 export interface CardData {
   id?: string;
   bank_id: string;

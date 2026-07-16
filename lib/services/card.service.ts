@@ -1,7 +1,7 @@
 // lib/services/card.service.ts
 import { createClient } from '@/lib/supabase/client';
 import { Stripe } from 'stripe';
-
+export const dynamic = 'force-dynamic'
 export interface CardData {
   id?: string;
   user_id: string;
