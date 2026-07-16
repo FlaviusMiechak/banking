@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./card.css";
 
 export default async function RootLayout({
   children,

@@ -9,6 +9,7 @@ import {
   Globe,
   CheckCircle,
 } from "lucide-react";
+import Link from "next/link";
 
 export default function HomePage() {
     //buttons to navigate to login and signup pages
@@ -77,14 +78,10 @@ export default function HomePage() {
             </p>
 
             <div className="mt-10 flex flex-wrap gap-5">
-              <button className="flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-4 font-semibold text-white hover:bg-blue-700">
+              <Link href="/sign-in" className="flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-4 font-semibold text-white hover:bg-blue-700">
                 Get Started
                 <ArrowRight size={18} />
-              </button>
-
-              <button className="rounded-xl border px-8 py-4 font-semibold hover:bg-gray-100">
-                Learn More
-              </button>
+              </Link>
             </div>
 
             <div className="mt-12 flex flex-wrap gap-10">
@@ -276,9 +273,12 @@ export default function HomePage() {
               manage their finances securely.
             </p>
 
-            <button className="mt-10 rounded-xl bg-white px-8 py-4 font-semibold text-blue-600">
-             create Account
-            </button>
+            <div className="mt-10 flex flex-wrap gap-5">
+              <Link href="/sign-in" className="flex items-center gap-2 rounded-xl bg-blue-600 px-8 py-4 font-semibold text-white hover:bg-blue-700">
+                Create account
+                <ArrowRight size={18} />
+              </Link>
+            </div>
 
           </div>
 

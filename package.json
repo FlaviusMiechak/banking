@@ -1,9 +1,13 @@
 {
-  "name": "jsm_banking",
-  "version": "0.1.0",
-  "private": true,
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "veripay",
+  "version": "0.6.0",
+  "private": false,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
+    "clean": "rm -rf .next || rmdir /s .next",
+    "dev:clean": "npm run clean && npm run dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

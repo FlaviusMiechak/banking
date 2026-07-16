@@ -78,7 +78,7 @@ export async function getAccount({
   bank_id: string;
 }) {
 
-  const supabase = await createClient();
+  const supabase = createClient();
 
   const { data: account } = await supabase
     .from("bank_accounts")

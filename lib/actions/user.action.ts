@@ -246,6 +246,30 @@ export async function loginUser({
   return data.user;
 }
 
+//getLoggedInUser
+export async function getLoggedInUser() {
+
+const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+   if (error || !user) {
+    return null;
+  }
+
+  // Get user data from your users table
+  const { data: userData } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', user.id)
+    .single();
+
+  return userData || user;
+}
+
+
+
+
+
 /* =========================================================
    LOGOUT
 ========================================================= */
